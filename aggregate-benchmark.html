@@ -85,12 +85,6 @@
   .cmp table td:first-child{text-align:left;color:var(--muted)}
   .win{color:var(--good);font-weight:700}
 
-  .linechart{margin:34px 0 0;padding:20px 22px;background:var(--panel);border:1px solid var(--line);border-radius:14px}
-  .linechart h3{font-size:12px;letter-spacing:.12em;text-transform:uppercase;color:var(--dim);margin-bottom:8px;font-weight:600}
-  .lc-note{font-size:13px;color:var(--muted);margin-bottom:14px}
-  .lc-wrap{position:relative;height:440px}
-  @media(max-width:720px){.lc-wrap{height:520px}}
-
   .method{margin-top:44px}
   .method h2{font-size:20px;margin-bottom:8px}
   .method .card{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:16px 18px;margin-top:12px;font-size:14px;color:var(--muted)}
@@ -139,12 +133,6 @@
     <thead><tr id="head"></tr></thead>
     <tbody id="body"></tbody>
   </table>
-
-  <div class="linechart">
-    <h3>Category profile — every model</h3>
-    <div class="lc-note">Normalized 0–100 category scores for all ranked models. Click a name in the legend to hide or isolate its line. Respects the Proprietary / Open-weight filter above.</div>
-    <div class="lc-wrap"><canvas id="lineall"></canvas></div>
-  </div>
 
   <div class="cmp">
     <h3>Head-to-head</h3>
@@ -452,40 +440,6 @@ function toggleDetail(m,tr){
       scales:{r:{min:0,max:100,ticks:{display:false,stepSize:25},grid:{color:"#28303f"},angleLines:{color:"#28303f"},pointLabels:{color:"#8994a7",font:{size:11}}}}}});
 }
 
-// ---------- LINE CHART: ALL MODELS ----------
-let lineChart=null;
-function modelColor(idx){ return `hsl(${Math.round(idx*360/MODELS.length)},72%,62%)`; }
-function renderLine(){
-  const ctx=document.getElementById("lineall"); if(!ctx) return;
-  const filtered = MODELS.map((m,idx)=>({m,idx})).filter(({m})=>{
-    if(state.filter==="all") return true;
-    if(state.filter==="proprietary") return m.type==="proprietary";
-    return m.type==="open";
-  });
-  const datasets = filtered.map(({m,idx})=>{
-    const col=modelColor(idx);
-    return {
-      label:m.name,
-      data:CATS.map(c=>{const s=catScore(m,c.key); return s==null?null:+s.toFixed(1);}),
-      borderColor:col, backgroundColor:col, pointBackgroundColor:col,
-      borderWidth:2, pointRadius:3, pointHoverRadius:5, tension:.25, spanGaps:true
-    };
-  });
-  if(lineChart) lineChart.destroy();
-  lineChart=new Chart(ctx,{type:"line",
-    data:{labels:CATS.map(c=>c.label),datasets},
-    options:{responsive:true,maintainAspectRatio:false,
-      interaction:{mode:"nearest",intersect:false},
-      plugins:{
-        legend:{position:"bottom",labels:{color:"#8994a7",boxWidth:12,padding:9,font:{size:11}}},
-        tooltip:{callbacks:{label:c=>`${c.dataset.label}: ${c.parsed.y==null?"—":c.parsed.y}`}}
-      },
-      scales:{
-        y:{min:0,max:100,ticks:{color:"#8994a7",stepSize:20},grid:{color:"#28303f"},title:{display:true,text:"Normalized score",color:"#5d6879",font:{size:11}}},
-        x:{ticks:{color:"#8994a7"},grid:{color:"#28303f"}}
-      }}});
-}
-
 // ---------- HEAD TO HEAD ----------
 function fillCompare(){
   const a=document.getElementById("cmpA"), b=document.getElementById("cmpB");
@@ -530,7 +484,7 @@ document.querySelectorAll("#modebar button").forEach(btn=>{
 document.querySelectorAll("#filterbar button").forEach(btn=>{
   btn.addEventListener("click",()=>{
     document.querySelectorAll("#filterbar button").forEach(b=>b.classList.remove("on"));
-    btn.classList.add("on"); state.filter=btn.dataset.filter; renderBoard(); renderLine();
+    btn.classList.add("on"); state.filter=btn.dataset.filter; renderBoard();
   });
 });
 document.getElementById("wreset").addEventListener("click",()=>{
@@ -540,7 +494,6 @@ document.getElementById("wreset").addEventListener("click",()=>{
 
 renderSliders();
 renderBoard();
-renderLine();
 fillCompare();
 renderMode();
 </script>
