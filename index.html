@@ -86,7 +86,9 @@
   .win{color:var(--good);font-weight:700}
 
   .linechart{margin:34px 0 0;padding:20px 22px;background:var(--panel);border:1px solid var(--line);border-radius:14px}
-  .linechart h3{font-size:12px;letter-spacing:.12em;text-transform:uppercase;color:var(--dim);margin-bottom:8px;font-weight:600}
+  .linechart h3{font-size:12px;letter-spacing:.12em;text-transform:uppercase;color:var(--dim);font-weight:600}
+  .lc-head{display:flex;justify-content:space-between;align-items:center;gap:14px;flex-wrap:wrap;margin-bottom:8px}
+  #chartview button{padding:6px 12px}
   .lc-note{font-size:13px;color:var(--muted);margin-bottom:14px}
   .lc-wrap{position:relative;height:440px}
   @media(max-width:720px){.lc-wrap{height:520px}}
@@ -141,9 +143,15 @@
   </table>
 
   <div class="linechart">
-    <h3>Category profile — every model</h3>
-    <div class="lc-note">Normalized 0–100 category scores for all ranked models. Click a name in the legend to hide or isolate its line. Respects the Proprietary / Open-weight filter above.</div>
-    <div class="lc-wrap"><canvas id="lineall"></canvas></div>
+    <div class="lc-head">
+      <h3>Model comparison</h3>
+      <div class="modebar" id="chartview">
+        <button data-view="profile" class="on">Category profile</button>
+        <button data-view="scatter">Score vs cost</button>
+      </div>
+    </div>
+    <div class="lc-note" id="lc-note"></div>
+    <div class="lc-wrap"><canvas id="mainchart"></canvas></div>
   </div>
 
   <div class="cmp">
@@ -255,6 +263,7 @@ let state = {
   filter:"all",
   sortKey:"composite",
   sortDir:-1,
+  chartView:"profile",
   weights:{}
 };
 CATS.forEach(c=>state.weights[c.key]=c.def);
@@ -412,6 +421,7 @@ function renderBoard(){
     body.appendChild(tr);
   });
   document.getElementById("s-models").textContent=MODELS.length;
+  renderMainChart();
 }
 
 function toggleDetail(m,tr){
@@ -452,17 +462,28 @@ function toggleDetail(m,tr){
       scales:{r:{min:0,max:100,ticks:{display:false,stepSize:25},grid:{color:"#28303f"},angleLines:{color:"#28303f"},pointLabels:{color:"#8994a7",font:{size:11}}}}}});
 }
 
-// ---------- LINE CHART: ALL MODELS ----------
-let lineChart=null;
+// ---------- MAIN CHART: PROFILE  /  SCORE-vs-COST ----------
+let mainChart=null;
 function modelColor(idx){ return `hsl(${Math.round(idx*360/MODELS.length)},72%,62%)`; }
-function renderLine(){
-  const ctx=document.getElementById("lineall"); if(!ctx) return;
-  const filtered = MODELS.map((m,idx)=>({m,idx})).filter(({m})=>{
+function filteredModels(){
+  return MODELS.map((m,idx)=>({m,idx})).filter(({m})=>{
     if(state.filter==="all") return true;
     if(state.filter==="proprietary") return m.type==="proprietary";
     return m.type==="open";
   });
-  const datasets = filtered.map(({m,idx})=>{
+}
+const CHART_NOTES = {
+  profile:"Normalized 0–100 category scores for every ranked model. Click a name in the legend to hide or isolate its line. Respects the Proprietary / Open-weight filter.",
+  scatter:"Aggregate capability score vs. blended API price (log scale) — up-and-left is the value frontier. Score uses your current capability weight sliders; cost is ignored in the score itself. Models with no public price are omitted."
+};
+function renderMainChart(){
+  document.querySelectorAll("#chartview button").forEach(b=>b.classList.toggle("on",b.dataset.view===state.chartView));
+  const note=document.getElementById("lc-note"); if(note) note.textContent=CHART_NOTES[state.chartView];
+  if(state.chartView==="scatter") renderScatter(); else renderProfile();
+}
+function renderProfile(){
+  const ctx=document.getElementById("mainchart"); if(!ctx) return;
+  const datasets = filteredModels().map(({m,idx})=>{
     const col=modelColor(idx);
     return {
       label:m.name,
@@ -471,10 +492,10 @@ function renderLine(){
       borderWidth:2, pointRadius:3, pointHoverRadius:5, tension:.25, spanGaps:true
     };
   });
-  if(lineChart) lineChart.destroy();
-  lineChart=new Chart(ctx,{type:"line",
+  if(mainChart) mainChart.destroy();
+  mainChart=new Chart(ctx,{type:"line",
     data:{labels:CATS.map(c=>c.label),datasets},
-    options:{responsive:true,maintainAspectRatio:false,
+    options:{responsive:true,maintainAspectRatio:false,animation:false,
       interaction:{mode:"nearest",intersect:false},
       plugins:{
         legend:{position:"bottom",labels:{color:"#8994a7",boxWidth:12,padding:9,font:{size:11}}},
@@ -484,6 +505,41 @@ function renderLine(){
         y:{min:0,max:100,ticks:{color:"#8994a7",stepSize:20},grid:{color:"#28303f"},title:{display:true,text:"Normalized score",color:"#5d6879",font:{size:11}}},
         x:{ticks:{color:"#8994a7"},grid:{color:"#28303f"}}
       }}});
+}
+function renderScatter(){
+  const ctx=document.getElementById("mainchart"); if(!ctx) return;
+  const pts = filteredModels().filter(({m})=>m.blended!=null && perfComposite(m)!=null)
+    .map(({m})=>({x:m.blended, y:+perfComposite(m).toFixed(1), name:m.name, type:m.type}));
+  const mk=(t,col)=>({label:t==="proprietary"?"Proprietary":"Open-weight",
+    data:pts.filter(p=>p.type===t), backgroundColor:col, borderColor:col,
+    pointRadius:6, pointHoverRadius:8});
+  const nameLabels={id:"ptLabels",afterDatasetsDraw(chart){
+    const ctx=chart.ctx; ctx.save();
+    ctx.font='10px -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif';
+    ctx.fillStyle="#c3cbd9"; ctx.textAlign="left"; ctx.textBaseline="middle";
+    chart.data.datasets.forEach((ds,di)=>{
+      const meta=chart.getDatasetMeta(di); if(meta.hidden) return;
+      meta.data.forEach((pt,i)=>{ ctx.fillText(ds.data[i].name, pt.x+9, pt.y); });
+    });
+    ctx.restore();
+  }};
+  if(mainChart) mainChart.destroy();
+  mainChart=new Chart(ctx,{type:"scatter",
+    data:{datasets:[mk("proprietary","#6ea8fe"),mk("open","#4ade80")]},
+    options:{responsive:true,maintainAspectRatio:false,animation:false,
+      layout:{padding:{right:24}},
+      plugins:{
+        legend:{position:"bottom",labels:{color:"#8994a7",boxWidth:12,padding:10,font:{size:11},usePointStyle:true}},
+        tooltip:{callbacks:{label:c=>`${c.raw.name}: score ${c.raw.y.toFixed(1)} · $${c.raw.x.toFixed(2)}/1M`}}
+      },
+      scales:{
+        x:{type:"logarithmic",title:{display:true,text:"Blended API price  $/1M  (log scale)",color:"#5d6879",font:{size:11}},
+           grid:{color:"#28303f"},
+           ticks:{color:"#8994a7",callback:v=>[0.5,1,2,5,10,20,50].includes(v)?"$"+v:""}},
+        y:{min:0,max:100,title:{display:true,text:"Aggregate capability score",color:"#5d6879",font:{size:11}},
+           ticks:{color:"#8994a7",stepSize:20},grid:{color:"#28303f"}}
+      }},
+    plugins:[nameLabels]});
 }
 
 // ---------- HEAD TO HEAD ----------
@@ -530,7 +586,12 @@ document.querySelectorAll("#modebar button").forEach(btn=>{
 document.querySelectorAll("#filterbar button").forEach(btn=>{
   btn.addEventListener("click",()=>{
     document.querySelectorAll("#filterbar button").forEach(b=>b.classList.remove("on"));
-    btn.classList.add("on"); state.filter=btn.dataset.filter; renderBoard(); renderLine();
+    btn.classList.add("on"); state.filter=btn.dataset.filter; renderBoard();
+  });
+});
+document.querySelectorAll("#chartview button").forEach(btn=>{
+  btn.addEventListener("click",()=>{
+    state.chartView=btn.dataset.view; renderMainChart();
   });
 });
 document.getElementById("wreset").addEventListener("click",()=>{
@@ -540,7 +601,6 @@ document.getElementById("wreset").addEventListener("click",()=>{
 
 renderSliders();
 renderBoard();
-renderLine();
 fillCompare();
 renderMode();
 </script>
